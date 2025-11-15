@@ -1,6 +1,8 @@
 {
   "name": "onebox",
   "version": "1.0.0",
+  "type": "module",
+
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -14,7 +16,7 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "type": "commonjs",
+
   "dependencies": {
     "@elastic/elasticsearch": "^9.2.0",
     "@slack/webhook": "^7.0.6",
