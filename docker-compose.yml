@@ -1,0 +1,46 @@
+services:
+  # Elasticsearch for search
+  elasticsearch:
+    image: elasticsearch:9.2.0
+    container_name: onebox-elastic
+    environment:
+      - "discovery.type=single-node"
+      - "xpack.security.enabled=false"
+      - "ES_JAVA_OPTS=-Xms2g -Xms2g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - esdata:/usr/share/elasticsearch/data
+    networks:
+      - onebox-net
+
+  # Kibana for viewing Elastic data
+  kibana:
+    image: kibana:9.2.0
+    container_name: onebox-kibana
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    environment:
+      - "ELASTICSEARCH_HOSTS=http://elasticsearch:9200"
+    networks:
+      - onebox-net
+
+  # ChromaDB for vector storage (for Feature 6)
+  chromadb:
+    image: chromadb/chroma:latest #  <-- Correct
+    container_name: onebox-chroma
+    ports:
+      - "8000:8000"
+    volumes:
+      - chromadata:/chroma/chroma
+    networks:
+      - onebox-net
+
+volumes:
+  esdata: # Persistent volume for Elastic data
+  chromadata: # Persistent volume for Chroma data
+
+networks:
+  onebox-net: # Custom network for services to talk to each other
