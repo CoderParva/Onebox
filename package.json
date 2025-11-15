@@ -35,8 +35,7 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
-    // ➡️ RECOMMENDED: Add this if you haven't already to fix TS7016
-    "@types/node-imap": "^0.9.3", 
+    "@types/node-imap": "^0.9.3",
     "@types/express": "^5.0.5",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^24.10.1",
