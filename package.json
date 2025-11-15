@@ -4,9 +4,14 @@
   "type": "module",
 
   "description": "",
-  "main": "index.js",
+  "main": "dist/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    // ➡️ ADDED: Production build script to compile TypeScript
+    "build": "tsc", 
+    // ➡️ ADDED: Production start script to run compiled JS from the 'dist' folder
+    "start": "node dist/server.js", 
+    
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:backend": "npm run dev",
     "dev:frontend": "cd ui && npm run dev",
@@ -33,6 +38,8 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
+    // ➡️ RECOMMENDED: Add this if you haven't already to fix TS7016
+    "@types/node-imap": "^0.9.3", 
     "@types/express": "^5.0.5",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^24.10.1",

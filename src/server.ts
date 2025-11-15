@@ -1,21 +1,23 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
-import express, { Request, Response } from 'express';
+// ➡️ FIX TS1484: Use 'type' for type-only imports when verbatimModuleSyntax is true
+import express, { type Request, type Response } from 'express';
 import http from 'http';
 import Imap from 'node-imap';
-import path from 'path'; // <-- CRITICAL FIX: Import path
+import path from 'path';
 import { WebSocket, WebSocketServer } from 'ws';
 import { EmailDocument, elasticsearchService } from './services/elasticsearch.service';
 import { ImapService } from './services/imap.service';
 import { ragService } from './services/rag.service';
 
 // --- CRITICAL FIX: Load environment variables explicitly from root ---
-// This ensures variables are available regardless of 'concurrently' path confusion.
+// This ensures variables are available regardless of path confusion.
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
 // --- Global App Variables ---
 const app = express();
-const port = 3000;
+// ➡️ CRITICAL FIX: Use process.env.PORT for hosting environments (Render)
+const port = parseInt(process.env.PORT || '3000', 10); 
 const imapConnections = new Map<string, ImapService>();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
