@@ -5,13 +5,10 @@
 
   "description": "",
   "main": "dist/server.js",
-  "scripts": {
+ "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    // ➡️ ADDED: Production build script to compile TypeScript
-    "build": "tsc", 
-    // ➡️ ADDED: Production start script to run compiled JS from the 'dist' folder
-    "start": "node dist/server.js", 
-    
+    "build": "tsc",
+    "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:backend": "npm run dev",
     "dev:frontend": "cd ui && npm run dev",
