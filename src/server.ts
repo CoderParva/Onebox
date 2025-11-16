@@ -5,16 +5,24 @@ import express, { Request, Response } from 'express';
 import Imap from 'node-imap';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import type { EmailDocument } from './services/elasticsearch.service.js';
 import { esClient, indexEmail } from './services/elasticsearch.service.js';
 import { startImapService } from './services/imap.service.js';
 import { queryRAG } from './services/rag.service.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Serve static files from the React app
+app.use(express.static(path.join(__dirname, 'public')));
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -102,6 +110,11 @@ app.post('/api/suggest-reply', async (req: Request, res: Response): Promise<any>
     console.error('Error generating reply:', err);
     res.status(500).json({ error: err.message });
   }
+});
+
+// Serve React app for all other routes
+app.get('*', (req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 server.listen(PORT, () => {
