@@ -33,6 +33,10 @@ export async function initializeIndex() {
   const indexName = 'emails';
   
   try {
+    // Check if Elasticsearch is available
+    await esClient.ping();
+    console.log('Elasticsearch connection successful');
+    
     const exists = await esClient.indices.exists({ index: indexName });
     
     if (!exists) {
@@ -67,8 +71,10 @@ export async function initializeIndex() {
       console.log(`Index ${indexName} already exists`);
     }
   } catch (error: any) {
-    console.error('Error initializing index:', error.message);
-    throw error;
+    console.error('Error initializing Elasticsearch:', error.message);
+    console.warn('⚠️  Elasticsearch is not available. Email storage will not work.');
+    console.warn('💡 To fix: Set ELASTICSEARCH_URL environment variable or run Elasticsearch locally');
+    // Don't throw error - allow app to start without Elasticsearch
   }
 }
 
