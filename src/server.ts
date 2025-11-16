@@ -1,153 +1,143 @@
 import cors from 'cors';
 import dotenv from 'dotenv';
-// ➡️ FIX TS1484: Use 'type' for type-only imports when verbatimModuleSyntax is true
-import express, { type Request, type Response } from 'express';
-import http from 'http';
+dotenv.config();
+import express, { Request, Response } from 'express';
 import Imap from 'node-imap';
-import path from 'path';
-import { WebSocket, WebSocketServer } from 'ws';
-import { EmailDocument, elasticsearchService } from './services/elasticsearch.service';
-import { ImapService } from './services/imap.service';
-import { ragService } from './services/rag.service';
+import { createServer } from 'http';
+import { WebSocketServer } from 'ws';
+import type { EmailDocument } from './services/elasticsearch.service.js';
+import { esClient, indexEmail } from './services/elasticsearch.service.js';
+import { startImapService } from './services/imap.service.js';
+import { queryRAG } from './services/rag.service.js';
 
-// --- CRITICAL FIX: Load environment variables explicitly from root ---
-// This ensures variables are available regardless of path confusion.
-dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
-
-// --- Global App Variables ---
 const app = express();
-// ➡️ CRITICAL FIX: Use process.env.PORT for hosting environments (Render)
-const port = parseInt(process.env.PORT || '3000', 10); 
-const imapConnections = new Map<string, ImapService>();
-const server = http.createServer(app);
+const PORT = process.env.PORT || 3000;
+
+app.use(cors());
+app.use(express.json());
+
+const server = createServer(app);
 const wss = new WebSocketServer({ server });
 
-console.log('[WSS] WebSocket server created.');
-const clients = new Set<WebSocket>();
-
-wss.on('connection', (ws) => {
-  console.log('[WSS] Client connected');
-  clients.add(ws);
-  ws.on('close', () => {
-    console.log('[WSS] Client disconnected');
-    clients.delete(ws);
-  });
-  ws.on('error', (err) => console.error('[WSS] WebSocket error:', err));
+wss.on('connection', (ws: any) => {
+  console.log('WebSocket client connected');
+  ws.on('close', () => console.log('WebSocket client disconnected'));
 });
 
-/**
- * Sends the new email object to all connected frontend clients.
- */
-export function broadcastNewMail(email: EmailDocument) {
-  console.log(`[WSS] Broadcasting NEW_MAIL for: ${email.subject}`);
-  
-  const payload = {
-    type: 'NEW_MAIL',
-    email: email
-  };
-
-  for (const client of clients) {
-    if (client.readyState === WebSocket.OPEN) {
-      client.send(JSON.stringify(payload));
-    }
-  }
-}
-
-// --- Express App Setup ---
-app.use(express.json());
-app.use(cors());
-
-// --- API ENDPOINTS ---
-app.get('/api/emails', async (req: Request, res: Response) => {
+app.get('/api/emails', async (req: Request, res: Response): Promise<any> => {
   try {
-    const accountId = req.query.accountId as string || process.env.IMAP_USER!;
-    const folder = (req.query.folder as string) || 'INBOX';
-    const searchQuery = (req.query.search as string) || '';
-    const emails = await elasticsearchService.searchEmails(accountId, folder, searchQuery);
+    const { search, folder, accountId } = req.query;
+    const indexName = 'emails';
+
+    const mustClauses: any[] = [];
+    if (accountId) mustClauses.push({ term: { accountId } });
+    if (folder) mustClauses.push({ term: { 'folder.keyword': folder } });
+
+    const query = search
+      ? {
+          bool: {
+            must: [
+              ...mustClauses,
+              {
+                multi_match: {
+                  query: search,
+                  fields: ['subject', 'body', 'from.name', 'from.address']
+                }
+              }
+            ]
+          }
+        }
+      : mustClauses.length > 0
+      ? { bool: { must: mustClauses } }
+      : { match_all: {} };
+
+    const result = await esClient.search({
+      index: indexName,
+      query: query,
+      sort: [{ receivedAt: { order: 'desc' } }],
+      size: 100
+    });
+
+    const emails = result.hits.hits.map((hit: any) => ({
+      id: hit._id,
+      ...hit._source
+    }));
+
     res.json(emails);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to fetch emails' });
+  } catch (err: any) {
+    console.error('Error fetching emails:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.get('/api/folders', (req: Request, res: Response) => {
-  res.json([
-    { id: 'INBOX', name: 'Inbox' },
-    { id: 'Sent', name: 'Sent' },
-    { id: 'Spam', name: 'Spam' },
-  ]);
+app.post('/api/sync', async (req: Request, res: Response): Promise<any> => {
+  try {
+    const imapConfig = {
+      user: process.env.IMAP_USER!,
+      password: process.env.IMAP_PASSWORD!,
+      host: process.env.IMAP_HOST!,
+      port: parseInt(process.env.IMAP_PORT || '993'),
+      tls: process.env.IMAP_TLS === 'true',
+      tlsOptions: { rejectUnauthorized: false },
+      accountId: 'account1'
+    };
+
+    startImapService(imapConfig);
+    res.json({ message: 'IMAP sync started' });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.post('/api/suggest-reply', async (req: Request, res: Response) => {
+app.post('/api/suggest-reply', async (req: Request, res: Response): Promise<any> => {
   try {
     const { emailBody } = req.body;
     if (!emailBody) {
       return res.status(400).json({ error: 'emailBody is required' });
     }
-    const reply = await ragService.generateReplyForText(emailBody);
+
+    const reply = await queryRAG(emailBody);
     res.json({ reply });
-  } catch (err) {
-    console.error('[API] Error generating reply:', err);
-    res.status(500).json({ error: 'Failed to generate reply' });
+  } catch (err: any) {
+    console.error('Error generating reply:', err);
+    res.status(500).json({ error: err.message });
   }
 });
 
-app.post('/api/sync', (req: Request, res: Response) => {
-  try {
-    const accountId = req.body.accountId || process.env.IMAP_USER!;
-    const connection = imapConnections.get(accountId);
-    if (connection) {
-      console.log(`[API] Triggering manual sync for ${accountId}`);
-      connection.syncLast30Days();
-      res.status(200).json({ message: 'Sync triggered.' });
-    } else {
-      res.status(404).json({ error: 'Account not found or not connected.' });
-    }
-  } catch (err) {
-    console.error('[API] Error triggering sync:', err);
-    res.status(500).json({ error: 'Failed to trigger sync' });
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  
+  // Start IMAP sync for account 1
+  if (process.env.IMAP_USER && process.env.IMAP_PASSWORD) {
+    startImapService({
+      user: process.env.IMAP_USER,
+      password: process.env.IMAP_PASSWORD,
+      host: process.env.IMAP_HOST || 'imap.gmail.com',
+      port: parseInt(process.env.IMAP_PORT || '993'),
+      tls: process.env.IMAP_TLS !== 'false',
+      tlsOptions: { rejectUnauthorized: false },
+      accountId: 'account1'
+    });
   }
-});
 
-app.get('/health', (req: Request, res: Response) => {
-  res.status(200).json({ status: 'OK', message: 'Server is running' });
-});
-
-// --- SERVER STARTUP ---
-server.listen(port, async () => {
-  console.log(`Server listening at http://localhost:${port}`);
-  
-  await elasticsearchService.setup();
-  await ragService.setup(); 
-  
-  // --- Start Account 1 (Primary) ---
-  console.log('[Server] Starting IMAP for Account 1...');
-  const config1: Imap.Config = {
-    user: process.env.IMAP_USER!,
-    password: process.env.IMAP_PASSWORD!,
-    host: process.env.IMAP_HOST!,
-    port: parseInt(process.env.IMAP_PORT!, 10) || 993,
-    tls: process.env.IMAP_TLS === 'true',
-    tlsOptions: { rejectUnauthorized: false }
-  };
-  const account1 = new ImapService(config1);
-  imapConnections.set(config1.user!, account1); 
-  account1.connect();
-
-  // --- Start Account 2 (Optional) ---
+  // Start IMAP sync for account 2 if configured
   if (process.env.IMAP_USER_2 && process.env.IMAP_PASSWORD_2) {
-    console.log('[Server] Starting IMAP for Account 2...');
-    const config2: Imap.Config = {
+    startImapService({
       user: process.env.IMAP_USER_2,
       password: process.env.IMAP_PASSWORD_2,
       host: process.env.IMAP_HOST_2 || 'imap.gmail.com',
-      port: parseInt(process.env.IMAP_PORT_2!, 10) || 993,
-      tls: true,
-      tlsOptions: { rejectUnauthorized: false }
-    };
-    const account2 = new ImapService(config2);
-    imapConnections.set(config2.user!, account2); 
-    account2.connect();
+      port: parseInt(process.env.IMAP_PORT_2 || '993'),
+      tls: process.env.IMAP_TLS_2 !== 'false',
+      tlsOptions: { rejectUnauthorized: false },
+      accountId: 'account2'
+    });
   }
 });
+
+export function broadcastToAll(data: any) {
+  wss.clients.forEach((client: any) => {
+    if (client.readyState === 1) {
+      client.send(JSON.stringify(data));
+    }
+  });
+}
