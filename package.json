@@ -1,13 +1,11 @@
 {
   "name": "onebox",
   "version": "1.0.0",
-  "type": "module",
-
   "description": "",
   "main": "dist/server.js",
- "scripts": {
+  "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "tsc",
+    "build": "tsc && cd ui && npm install && npm run build",
     "start": "node dist/server.js",
     "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
     "dev:backend": "npm run dev",
@@ -18,7 +16,6 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-
   "dependencies": {
     "@elastic/elasticsearch": "^9.2.0",
     "@slack/webhook": "^7.0.6",
