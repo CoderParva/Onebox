@@ -1,91 +1,87 @@
 import { Ollama } from 'ollama';
-import { EmailDocument, elasticsearchService } from './elasticsearch.service';
-import { notificationService } from './notification.service';
+import type { EmailDocument } from './elasticsearch.service.js';
+import { esClient, updateEmailCategory } from './elasticsearch.service.js';
+import { sendNotification } from './notification.service.js';
 
-const CATEGORIES = [
-  'Interested',
-  'Not Interested',
-  'Meeting Booked',
-  'Spam',
-  'Out of Office',
-].join(', ');
+const ollama = new Ollama({
+  host: process.env.OLLAMA_HOST || 'http://localhost:11434'
+});
 
-const SYSTEM_PROMPT = `You are an email categorization expert. Your ONLY job is to classify an email into one of the following categories: ${CATEGORIES}.
-Respond with ONLY the single category name and nothing else. Do not add any explanation or punctuation.`;
+const CATEGORIES = {
+  INTERESTED: 'Interested',
+  NOT_INTERESTED: 'Not Interested',
+  MEETING_BOOKED: 'Meeting Booked',
+  MEETING_COMPLETED: 'Meeting Completed',
+  SPAM: 'Spam',
+  CLOSED: 'Closed'
+};
 
-class CategorizationService {
-  private ollama: Ollama;
-  private emailQueue: EmailDocument[] = []; // <-- NEW: The queue
-  private isProcessing = false;             // <-- NEW: The processing flag
+export async function categorizeEmail(email: EmailDocument): Promise<string> {
+  try {
+    const prompt = `
+You are an AI email categorization assistant. Analyze the following email and categorize it into ONE of these categories:
+- Interested: The sender shows interest in a product/service/meeting
+- Not Interested: The sender explicitly declines or shows no interest
+- Meeting Booked: A meeting has been scheduled
+- Meeting Completed: A meeting has been completed
+- Spam: Promotional, unsolicited, or irrelevant content
+- Closed: The conversation or deal is closed
 
-  constructor() {
-    this.ollama = new Ollama({
-      host: 'http://localhost:11434',
+Email Details:
+From: ${email.from.name} <${email.from.address}>
+Subject: ${email.subject}
+Body: ${email.body.substring(0, 1000)}
+
+Respond with ONLY the category name, nothing else.
+`;
+
+    const response = await ollama.chat({
+      model: 'llama3:8b',
+      messages: [
+        {
+          role: 'user',
+          content: prompt
+        }
+      ],
+      stream: false
     });
-  }
 
-  // --- UPDATED ---
-  // This function is now very fast. It just adds to the queue.
-  public categorizeEmail(email: EmailDocument) {
-    this.emailQueue.push(email);
-    this.processQueue(); // Start the worker if it's not already running
-  }
-
-  // --- NEW FUNCTION: The Queue Worker ---
-  private async processQueue() {
-    // If the worker is already busy, or the queue is empty, do nothing.
-    if (this.isProcessing || this.emailQueue.length === 0) {
-      return;
+    let category = response.message?.content?.trim() || 'Not Interested';
+    
+    // Normalize category
+    const categoryUpper = category.toUpperCase().replace(/[^A-Z\s]/g, '');
+    
+    if (categoryUpper.includes('INTERESTED') && !categoryUpper.includes('NOT')) {
+      category = CATEGORIES.INTERESTED;
+    } else if (categoryUpper.includes('NOT') && categoryUpper.includes('INTERESTED')) {
+      category = CATEGORIES.NOT_INTERESTED;
+    } else if (categoryUpper.includes('MEETING') && categoryUpper.includes('BOOKED')) {
+      category = CATEGORIES.MEETING_BOOKED;
+    } else if (categoryUpper.includes('MEETING') && categoryUpper.includes('COMPLETED')) {
+      category = CATEGORIES.MEETING_COMPLETED;
+    } else if (categoryUpper.includes('SPAM')) {
+      category = CATEGORIES.SPAM;
+    } else if (categoryUpper.includes('CLOSED')) {
+      category = CATEGORIES.CLOSED;
+    } else {
+      category = CATEGORIES.NOT_INTERESTED;
     }
 
-    this.isProcessing = true;
-    const email = this.emailQueue.shift(); // Get the next email from the queue
-
-    if (!email) {
-      this.isProcessing = false;
-      return;
+    console.log(`Email categorized as: ${category}`);
+    
+    // Update category in Elasticsearch
+    await updateEmailCategory(email.messageId, category);
+    
+    // Send notification if interested
+    if (category === CATEGORIES.INTERESTED) {
+      await sendNotification(email, category);
     }
-
-    try {
-      // Log the queue length
-      console.log(`[AI/Ollama] Categorizing (Queue: ${this.emailQueue.length}): ${email.subject}`);
-      
-      const response = await this.ollama.chat({
-        model: 'llama3:8b', // Use the local model
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: `Subject: ${email.subject}\n\nBody: ${email.body.substring(0, 2000)}` },
-        ],
-        options: {
-            temperature: 0, // Deterministic
-        },
-      });
-
-      const category = response.message.content.trim();
-
-      if (!category) {
-        throw new Error('No category returned from AI.');
-      }
-
-      console.log(`[AI/Ollama] Email categorized as: ${category}`);
-
-      // 1. Save the category back to Elasticsearch
-      await elasticsearchService.updateEmailCategory(email.messageId, category);
-
-      // 2. Trigger notifications if "Interested"
-      if (category === 'Interested') {
-        await notificationService.sendInterestAlert(email);
-      }
-    } catch (err) {
-      console.error(`[AI/Ollama] Error categorizing email ${email.messageId}:`, err);
-    } finally {
-      // --- IMPORTANT ---
-      // Worker is done, allow it to process the next item.
-      this.isProcessing = false;
-      // Check for more items in the queue immediately.
-      this.processQueue();
-    }
+    
+    return category;
+  } catch (error: any) {
+    console.error('Error categorizing email:', error.message);
+    return CATEGORIES.NOT_INTERESTED;
   }
 }
 
-export const categorizationService = new CategorizationService();
+export { CATEGORIES };
