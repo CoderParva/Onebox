@@ -91,8 +91,7 @@ export async function initializeIndex() {
     console.warn('💡 Troubleshooting:');
     console.warn('   1. Check if ELASTICSEARCH_URL is set correctly');
     console.warn('   2. Verify credentials in the URL');
-    console.warn('   3. Check if the service is running (Bonsai/SearchBox dashboard)');
-    console.warn('   4. Try using SearchBox.io or Elastic Cloud instead');
+    console.warn('   3. Check if the service is running (SearchBox dashboard)');
     // Don't throw error - allow app to start without Elasticsearch
   }
 }
@@ -106,9 +105,9 @@ export async function indexEmail(email: EmailDocument) {
       id: email.messageId,
       document: email
     });
-    console.log(`✅ Email indexed: ${email.subject}`);
+    console.log(`Email indexed: ${email.subject}`);
   } catch (error: any) {
-    console.error('❌ Error indexing email:', error.message);
+    console.error('Error indexing email:', error.message);
     throw error;
   }
 }
@@ -124,9 +123,9 @@ export async function updateEmailCategory(id: string, category: string) {
         category: category
       }
     });
-    console.log(`✅ Email ${id} updated with category: ${category}`);
+    console.log(`Email ${id} updated with category: ${category}`);
   } catch (error: any) {
-    console.error('❌ Error updating email category:', error.message);
+    console.error('Error updating email category:', error.message);
     throw error;
   }
 }
@@ -151,7 +150,7 @@ export async function searchEmails(
       ...hit._source
     }));
   } catch (error: any) {
-    console.error('❌ Error searching emails:', error.message);
+    console.error('Error searching emails:', error.message);
     throw error;
   }
 }
