@@ -21,6 +21,7 @@
   "license": "ISC",
   "dependencies": {
     "@elastic/elasticsearch": "^9.2.0",
+    "@opensearch-project/opensearch": "^2.5.0",
     "@slack/webhook": "^7.0.6",
     "axios": "^1.13.2",
     "chromadb-client": "^2.4.6",
