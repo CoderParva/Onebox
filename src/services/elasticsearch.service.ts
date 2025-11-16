@@ -19,14 +19,20 @@ export interface EmailDocument {
 
 const esHost = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
+console.log('Connecting to Elasticsearch:', esHost.replace(/:[^:]*@/, ':****@')); // Hide password in logs
+
 export const esClient = new Client({
   node: esHost,
-  auth: process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD 
+  // Only add auth if username/password are separate (not needed for Bonsai URL with embedded auth)
+  auth: (!esHost.includes('@') && process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD) 
     ? {
         username: process.env.ELASTICSEARCH_USERNAME,
         password: process.env.ELASTICSEARCH_PASSWORD
       }
-    : undefined
+    : undefined,
+  tls: {
+    rejectUnauthorized: false // Allow self-signed certificates
+  }
 });
 
 export async function initializeIndex() {
