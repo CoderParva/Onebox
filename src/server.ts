@@ -112,8 +112,8 @@ app.post('/api/suggest-reply', async (req: Request, res: Response): Promise<any>
   }
 });
 
-// Serve React app for all other routes
-app.get('*', (req: Request, res: Response) => {
+// Serve React app for all other routes (must be last)
+app.get('/*', (req: Request, res: Response) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
