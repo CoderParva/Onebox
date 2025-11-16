@@ -50,7 +50,7 @@ function App() {
         toast.success(`New email from ${data.email.from.name}`);
         setEmails((prev) => [data.email, ...prev]);
       } else if (data.type === 'email_categorized') {
-        toast.info(`Email categorized as: ${data.category}`);
+        toast.success(`Email categorized as: ${data.category}`);
         setEmails((prev) =>
           prev.map((email) =>
             email.messageId === data.messageId
