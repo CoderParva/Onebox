@@ -1,11 +1,19 @@
-import { Ollama } from 'ollama';
+import Groq from 'groq-sdk';
 import type { EmailDocument } from './elasticsearch.service.js';
 import { esClient, updateEmailCategory } from './elasticsearch.service.js';
 import { sendNotification } from './notification.service.js';
 
-const ollama = new Ollama({
-  host: process.env.OLLAMA_HOST || 'http://localhost:11434'
-});
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+
+let groq: Groq | null = null;
+
+if (GROQ_API_KEY) {
+  groq = new Groq({
+    apiKey: GROQ_API_KEY,
+  });
+} else {
+  console.warn('Warning: GROQ_API_KEY not set. Email categorization will be limited.');
+}
 
 const CATEGORIES = {
   INTERESTED: 'Interested',
@@ -17,6 +25,11 @@ const CATEGORIES = {
 };
 
 export async function categorizeEmail(email: EmailDocument): Promise<string> {
+  if (!groq) {
+    console.log('Groq not configured, skipping categorization');
+    return CATEGORIES.NOT_INTERESTED;
+  }
+
   try {
     const prompt = `
 You are an AI email categorization assistant. Analyze the following email and categorize it into ONE of these categories:
@@ -35,18 +48,23 @@ Body: ${email.body.substring(0, 1000)}
 Respond with ONLY the category name, nothing else.
 `;
 
-    const response = await ollama.chat({
-      model: 'llama3:8b',
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-70b-versatile', // Free and powerful
       messages: [
+        {
+          role: 'system',
+          content: 'You are a professional email categorization assistant. Respond with only the category name.'
+        },
         {
           role: 'user',
           content: prompt
         }
       ],
-      stream: false
+      max_tokens: 50,
+      temperature: 0.3
     });
 
-    let category = response.message?.content?.trim() || 'Not Interested';
+    let category = response.choices[0]?.message?.content?.trim() || 'Not Interested';
     
     // Normalize category
     const categoryUpper = category.toUpperCase().replace(/[^A-Z\s]/g, '');
