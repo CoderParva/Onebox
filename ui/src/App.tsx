@@ -84,12 +84,33 @@ function App() {
       if (searchQuery) params.append('search', searchQuery);
       if (selectedFolder) params.append('folder', selectedFolder);
 
-      const response = await fetch(`${API_URL}/api/emails?${params}`);
+      const apiUrl = `${window.location.origin}/api/emails?${params}`;
+      console.log('Fetching emails from:', apiUrl);
+      
+      const response = await fetch(apiUrl);
+      
+      if (!response.ok) {
+        throw new Error(`API error: ${response.status} ${response.statusText}`);
+      }
+      
       const data = await response.json();
-      setEmails(data);
-    } catch (error) {
+      console.log('Received data:', data);
+      
+      // Ensure data is an array
+      if (Array.isArray(data)) {
+        setEmails(data);
+      } else if (data && typeof data === 'object' && data.error) {
+        toast.error(`API Error: ${data.error}`);
+        setEmails([]);
+      } else {
+        console.error('Invalid data format:', data);
+        toast.error('Invalid response from server');
+        setEmails([]);
+      }
+    } catch (error: any) {
       console.error('Error fetching emails:', error);
-      toast.error('Failed to fetch emails');
+      toast.error(error.message || 'Failed to fetch emails');
+      setEmails([]);
     } finally {
       setLoading(false);
     }
@@ -97,7 +118,7 @@ function App() {
 
   const handleSync = async () => {
     try {
-      await fetch(`${API_URL}/api/sync`, { method: 'POST' });
+      await fetch(`${window.location.origin}/api/sync`, { method: 'POST' });
       toast.success('Sync started');
       setTimeout(fetchEmails, 2000);
     } catch (error) {
@@ -110,7 +131,7 @@ function App() {
     setLoading(true);
     setSuggestedReply('');
     try {
-      const response = await fetch(`${API_URL}/api/suggest-reply`, {
+      const response = await fetch(`${window.location.origin}/api/suggest-reply`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emailBody })
