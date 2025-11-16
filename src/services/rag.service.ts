@@ -1,19 +1,19 @@
-import { OpenAI } from 'openai';
+import Groq from 'groq-sdk';
 import { ChromaClient } from 'chromadb-client';
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const CHROMA_URL = process.env.CHROMA_URL || 'http://localhost:8000';
 
-let openai: OpenAI | null = null;
+let groq: Groq | null = null;
 let chromaClient: ChromaClient | null = null;
 
-// Initialize OpenAI if API key is available
-if (OPENAI_API_KEY) {
-  openai = new OpenAI({
-    apiKey: OPENAI_API_KEY,
+// Initialize Groq if API key is available
+if (GROQ_API_KEY) {
+  groq = new Groq({
+    apiKey: GROQ_API_KEY,
   });
 } else {
-  console.warn('Warning: OPENAI_API_KEY not set. RAG functionality will be limited.');
+  console.warn('Warning: GROQ_API_KEY not set. RAG functionality will be limited.');
 }
 
 // Initialize ChromaDB client
@@ -49,38 +49,24 @@ export async function storeEmailInVectorDB(emailId: string, emailBody: string) {
 }
 
 export async function queryRAG(emailBody: string): Promise<string> {
-  if (!chromaClient || !openai) {
-    return 'RAG service not fully configured. Please set OPENAI_API_KEY and ensure ChromaDB is running.';
+  if (!groq) {
+    return 'RAG service not fully configured. Please set GROQ_API_KEY.';
   }
 
   try {
-    // Get relevant context from ChromaDB
-    const collection = await chromaClient.getCollection({ name: 'emails' });
-    
-    const results = await collection.query({
-      queryTexts: [emailBody],
-      nResults: 3
-    });
-
-    let context = '';
-    if (results && results.documents && results.documents.length > 0) {
-      context = results.documents[0].join('\n\n');
-    }
-
-    // Generate reply using OpenAI
+    // For now, generate reply without vector context
+    // You can add ChromaDB integration later if needed
     const prompt = `
-You are a helpful email assistant. Based on the following email and relevant context from previous conversations, generate a professional and contextual reply.
+You are a helpful email assistant. Generate a professional and contextual reply to the following email.
 
 Email to reply to:
 ${emailBody}
 
-${context ? `Relevant context from previous emails:\n${context}` : ''}
-
 Generate a professional reply:
 `;
 
-    const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
+    const response = await groq.chat.completions.create({
+      model: 'llama-3.1-70b-versatile',
       messages: [
         {
           role: 'system',
@@ -95,7 +81,7 @@ Generate a professional reply:
       temperature: 0.7
     });
 
-    const reply = completion.choices[0]?.message?.content || 'Unable to generate reply';
+    const reply = response.choices[0]?.message?.content || 'Unable to generate reply';
     return reply;
   } catch (error: any) {
     console.error('Error in RAG query:', error.message);
