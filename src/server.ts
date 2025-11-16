@@ -37,6 +37,17 @@ app.get('/api/emails', async (req: Request, res: Response): Promise<any> => {
     const { search, folder, accountId } = req.query;
     const indexName = 'emails';
 
+    // Check if Elasticsearch is available
+    try {
+      await esClient.ping();
+    } catch (pingError) {
+      console.error('Elasticsearch is not available:', pingError);
+      return res.status(503).json({ 
+        error: 'Database not available. Please configure ELASTICSEARCH_URL environment variable.',
+        emails: []
+      });
+    }
+
     const mustClauses: any[] = [];
     if (accountId) mustClauses.push({ term: { accountId } });
     if (folder) mustClauses.push({ term: { 'folder.keyword': folder } });
@@ -74,7 +85,16 @@ app.get('/api/emails', async (req: Request, res: Response): Promise<any> => {
     res.json(emails);
   } catch (err: any) {
     console.error('Error fetching emails:', err);
-    res.status(500).json({ error: err.message });
+    
+    // Return empty array instead of error for better UX
+    if (err.message && err.message.includes('index_not_found')) {
+      return res.json([]);
+    }
+    
+    res.status(500).json({ 
+      error: err.message || 'Internal server error',
+      emails: []
+    });
   }
 });
 
