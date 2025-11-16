@@ -1,152 +1,137 @@
-import { ParsedMail, simpleParser } from 'mailparser';
+import { simpleParser } from 'mailparser';
 import Imap from 'node-imap';
-import { broadcastNewMail } from '../server'; // Import our broadcast function
-import { categorizationService } from './categorization.service';
-import { elasticsearchService, EmailDocument } from './elasticsearch.service';
+import { broadcastToAll } from '../server.js';
+import { categorizeEmail } from './categorization.service.js';
+import type { EmailDocument } from './elasticsearch.service.js';
+import { esClient, indexEmail } from './elasticsearch.service.js';
 
-export class ImapService {
-  private imap: Imap;
-  private accountId: string;
+export interface ImapConfig {
+  user: string;
+  password: string;
+  host: string;
+  port: number;
+  tls: boolean;
+  tlsOptions?: any;
+  accountId: string;
+}
 
-  constructor(config: Imap.Config) {
-    this.imap = new Imap(config);
-    this.accountId = config.user!;
-    this.setupListeners(config);
+export function startImapService(config: ImapConfig) {
+  const imap = new Imap({
+    user: config.user,
+    password: config.password,
+    host: config.host,
+    port: config.port,
+    tls: config.tls,
+    tlsOptions: config.tlsOptions || { rejectUnauthorized: false }
+  });
+
+  function openInbox(cb: any) {
+    imap.openBox('INBOX', false, cb);
   }
 
-  public connect() {
-    console.log(`[IMAP] Connecting to ${this.accountId}...`);
-    this.imap.connect();
-  }
-
-  private setupListeners(config: Imap.Config) {
-    this.imap.once('ready', () => {
-      console.log(`[IMAP] Connection successful for ${this.accountId}`);
-      this.openInbox();
-    });
-
-    this.imap.once('error', (err: Error) => {
-      console.error(`[IMAP ${this.accountId}] Connection error:`, err);
-    });
-
-    this.imap.once('end', () => {
-      console.log(`[IMAP ${this.accountId}] Connection ended`);
-    });
-
-    this.imap.on('mail', (numNewMsgs: number) => {
-      console.log(`[IMAP ${this.accountId}] New mail event! (${numNewMsgs} new message(s)).`);
-      this.fetchNewMessages();
-    });
-  }
-
-  private openInbox() {
-    this.imap.openBox('INBOX', false, (err, box) => { // false = not read-only
+  imap.once('ready', () => {
+    console.log(`IMAP connection ready for ${config.accountId}`);
+    openInbox((err: any, box: any) => {
       if (err) {
-        console.error(`[IMAP ${this.accountId}] Error opening INBOX:`, err);
+        console.error('Error opening inbox:', err);
         return;
       }
-      console.log(`[IMAP ${this.accountId}] INBOX opened.`);
-      
-      // 1. Sync last 30 days of emails
-      this.syncLast30Days();
 
-      // 2. The 'mail' event listener will handle new ones
-    });
-  }
+      console.log(`Inbox opened for ${config.accountId}`);
 
-  // This is public so the API can call it
-  public syncLast30Days() {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const searchDate = thirtyDaysAgo.toISOString().split('T')[0];
+      // Fetch recent emails
+      fetchRecentEmails(config.accountId);
 
-    console.log(`[IMAP ${this.accountId}] Fetching emails since ${searchDate}...`);
-
-    this.imap.search([['SINCE', searchDate]], (err, uids) => {
-      if (err || !uids || uids.length === 0) {
-        console.log(`[IMAP ${this.accountId}] No new emails found for the last 30 days.`);
-        return;
-      }
-      
-      console.log(`[IMAP ${this.accountId}] Found ${uids.length} emails to sync.`);
-      this.fetchAndProcess(uids); // Pass array of UIDs
-    });
-  }
-
-  private fetchNewMessages() {
-    console.log(`[IMAP ${this.accountId}] Checking for new messages...`);
-    this.imap.search(['UNSEEN'], (err, uids) => {
-      if (err || !uids || uids.length === 0) {
-        console.log(`[IMAP ${this.accountId}] No new unseen messages found.`);
-        return;
-      }
-      console.log(`[IMAP ${this.accountId}] Found ${uids.length} new messages.`);
-      this.fetchAndProcess(uids); // Pass UID array
-    });
-  }
-
-  private fetchAndProcess(uids: number[]) {
-    if (uids.length === 0) {
-      console.log(`[IMAP ${this.accountId}] No UIDs to fetch.`);
-      return;
-    }
-
-    const f = this.imap.fetch(uids, { bodies: '', markSeen: true }); // Mark as seen
-
-    f.on('message', (msg, seqno) => {
-      console.log(`[IMAP ${this.accountId}] Processing message #${seqno}`);
-
-      msg.on('body', (stream, info) => {
-        simpleParser(stream, async (err, parsed) => {
-          if (err) {
-            console.error(`[MailParser ${this.accountId}] Error parsing msg #${seqno}:`, err);
-            return;
-          }
-          
-          await this.indexParsedEmail(parsed, 'INBOX', seqno);
-        });
+      // Listen for new emails using IDLE
+      imap.on('mail', (numNewMsgs: number) => {
+        console.log(`${numNewMsgs} new email(s) received for ${config.accountId}`);
+        fetchRecentEmails(config.accountId);
       });
     });
+  });
 
-    f.once('error', (err) => {
-      console.error(`[IMAP ${this.accountId}] Fetch error:`, err);
-    });
+  function fetchRecentEmails(accountId: string) {
+    imap.search(['UNSEEN'], (err: any, uids: any) => {
+      if (err) {
+        console.error('Error searching emails:', err);
+        return;
+      }
 
-    f.once('end', () => {
-      console.log(`[IMAP ${this.accountId}] Finished fetching messages.`);
+      if (!uids || uids.length === 0) {
+        console.log('No new emails');
+        return;
+      }
+
+      console.log(`Fetching ${uids.length} new emails`);
+      const fetch = imap.fetch(uids, { bodies: '' });
+
+      fetch.on('message', (msg: any, seqno: any) => {
+        let buffer = '';
+        
+        msg.on('body', (stream: any, info: any) => {
+          stream.on('data', (chunk: any) => {
+            buffer += chunk.toString('utf8');
+          });
+
+          stream.once('end', async () => {
+            try {
+              const parsed = await simpleParser(buffer);
+              
+              const emailDoc: EmailDocument = {
+                accountId: accountId,
+                messageId: parsed.messageId || `${Date.now()}-${Math.random()}`,
+                from: {
+                  name: parsed.from?.value?.[0]?.name || '',
+                  address: parsed.from?.value?.[0]?.address || ''
+                },
+                to: (parsed.to?.value || []).map((to: any) => ({
+                  name: to.name || '',
+                  address: to.address || ''
+                })),
+                subject: parsed.subject || 'No Subject',
+                body: parsed.text || parsed.html || '',
+                receivedAt: parsed.date?.toISOString() || new Date().toISOString()
+              };
+
+              // Index email
+              await indexEmail(emailDoc);
+
+              // Broadcast to WebSocket clients
+              broadcastToAll({ type: 'new_email', email: emailDoc });
+
+              // Categorize email asynchronously
+              categorizeEmail(emailDoc).then(category => {
+                broadcastToAll({ 
+                  type: 'email_categorized', 
+                  messageId: emailDoc.messageId,
+                  category: category 
+                });
+              });
+
+            } catch (err: any) {
+              console.error('Error parsing email:', err);
+            }
+          });
+        });
+      });
+
+      fetch.once('error', (err: any) => {
+        console.error('Fetch error:', err);
+      });
+
+      fetch.once('end', () => {
+        console.log('Done fetching emails');
+      });
     });
   }
 
-  private async indexParsedEmail(parsed: ParsedMail, folder: string, seqno: number) {
-    if (!parsed.messageId) {
-      console.warn(`[IMAP ${this.accountId}] Skipping email with no messageId (seqno #${seqno})`);
-      return;
-    }
+  imap.once('error', (err: any) => {
+    console.error('IMAP error:', err);
+  });
 
-    const emailDoc: EmailDocument = {
-      accountId: this.accountId,
-      messageId: parsed.messageId,
-      from: {
-        name: parsed.from?.value[0]?.name || '',
-        address: parsed.from?.value[0]?.address || '',
-      },
-      to: parsed.to?.value.map(to => ({
-        name: to.name || '',
-        address: to.address || '',
-      })) || [],
-      subject: parsed.subject || '',
-      body: parsed.text || '', // Store the plain text body
-      receivedAt: parsed.date || new Date(),
-      folder: folder,
-    };
+  imap.once('end', () => {
+    console.log('IMAP connection ended');
+  });
 
-    // 1. Save to database
-    await elasticsearchService.indexEmail(emailDoc);
-
-    // 2. Send to UI via WebSocket *immediately*
-    broadcastNewMail(emailDoc);
-
-    // 3. Start AI categorization (runs in background)
-    categorizationService.categorizeEmail(emailDoc);
-  }
+  imap.connect();
 }
