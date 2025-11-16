@@ -96,12 +96,18 @@ function App() {
       const data = await response.json();
       console.log('Received data:', data);
       
+      // Check if response has error message
+      if (data && data.error) {
+        toast.error(data.error);
+        setEmails([]);
+        return;
+      }
+      
       // Ensure data is an array
       if (Array.isArray(data)) {
         setEmails(data);
-      } else if (data && typeof data === 'object' && data.error) {
-        toast.error(`API Error: ${data.error}`);
-        setEmails([]);
+      } else if (data && Array.isArray(data.emails)) {
+        setEmails(data.emails);
       } else {
         console.error('Invalid data format:', data);
         toast.error('Invalid response from server');
