@@ -1,13 +1,14 @@
 {
   "name": "onebox",
   "version": "1.0.0",
+  "type": "module",
   "description": "",
   "main": "dist/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc && cd ui && npm install && npm run build",
     "start": "node dist/server.js",
-    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "ts-node-dev --respawn --transpile-only --esm src/server.ts",
     "dev:backend": "npm run dev",
     "dev:frontend": "cd ui && npm run dev",
     "dev:ai": "ollama serve",
