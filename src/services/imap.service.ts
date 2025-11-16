@@ -62,8 +62,11 @@ export function startImapService(config: ImapConfig) {
         return;
       }
 
-      console.log(`Fetching ${uids.length} new emails`);
-      const fetch = imap.fetch(uids, { bodies: '' });
+      // Limit to 50 emails at a time to avoid memory issues
+      const emailsToFetch = uids.slice(0, 50);
+      console.log(`Fetching ${emailsToFetch.length} new emails (${uids.length} total unread)`);
+      
+      const fetch = imap.fetch(emailsToFetch, { bodies: '' });
 
       fetch.on('message', (msg: any, seqno: any) => {
         let buffer = '';
@@ -99,14 +102,18 @@ export function startImapService(config: ImapConfig) {
               // Broadcast to WebSocket clients
               broadcastToAll({ type: 'new_email', email: emailDoc });
 
-              // Categorize email asynchronously
-              categorizeEmail(emailDoc).then(category => {
-                broadcastToAll({ 
-                  type: 'email_categorized', 
-                  messageId: emailDoc.messageId,
-                  category: category 
+              // Categorize email asynchronously with delay to avoid overwhelming API
+              setTimeout(() => {
+                categorizeEmail(emailDoc).then(category => {
+                  broadcastToAll({ 
+                    type: 'email_categorized', 
+                    messageId: emailDoc.messageId,
+                    category: category 
+                  });
+                }).catch(err => {
+                  console.error('Categorization error:', err.message);
                 });
-              });
+              }, 1000); // 1 second delay between categorizations
 
             } catch (err: any) {
               console.error('Error parsing email:', err);
