@@ -28,7 +28,7 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [suggestedReply, setSuggestedReply] = useState('');
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+  const API_URL = import.meta.env.VITE_API_URL || window.location.origin;
 
   useEffect(() => {
     fetchEmails();
@@ -36,7 +36,11 @@ function App() {
   }, [searchQuery, selectedFolder]);
 
   const connectWebSocket = () => {
-    const wsUrl = API_URL.replace('http', 'ws');
+    // Use the same origin as the API, but with WebSocket protocol
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    
+    console.log('Connecting to WebSocket:', wsUrl);
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
