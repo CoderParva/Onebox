@@ -49,7 +49,8 @@ export async function initializeIndex() {
     console.log('Attempting to connect to Elasticsearch...');
     
     const pingResult = await esClient.info();
-    console.log('✅ Connected to:', pingResult.version?.distribution || 'Elasticsearch', pingResult.version?.number);
+    const version = (pingResult.version as any);
+    console.log('✅ Connected to Elasticsearch version:', version?.number || 'unknown');
     
     const exists = await esClient.indices.exists({ index: indexName });
     
