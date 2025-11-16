@@ -20,56 +20,36 @@ export interface EmailDocument {
 const esHost = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
 console.log('Elasticsearch URL configured:', esHost ? 'Yes' : 'No');
-console.log('Connecting to Elasticsearch...');
 
-// Parse the URL to extract auth if embedded
-let nodeUrl = esHost;
-let authConfig = undefined;
-
-try {
-  const url = new URL(esHost);
-  
-  // If URL has username:password in it, extract them
-  if (url.username && url.password) {
-    authConfig = {
-      username: decodeURIComponent(url.username),
-      password: decodeURIComponent(url.password)
-    };
-    
-    // Rebuild URL without auth for the node
-    nodeUrl = `${url.protocol}//${url.host}${url.pathname}${url.search}`;
-    console.log('Auth extracted from URL');
-  }
-} catch (e) {
-  console.log('Using URL as-is');
-}
-
-export const esClient = new Client({
-  node: nodeUrl,
-  auth: authConfig || (process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD 
-    ? {
-        username: process.env.ELASTICSEARCH_USERNAME,
-        password: process.env.ELASTICSEARCH_PASSWORD
-      }
-    : undefined),
+// Parse URL to handle different formats
+let clientConfig: any = {
+  node: esHost,
   tls: {
     rejectUnauthorized: false
   },
-  requestTimeout: 30000,
-  // Add compatibility header for Bonsai
-  headers: {
-    'Accept': 'application/json',
-    'Content-Type': 'application/json'
-  }
-});
+  requestTimeout: 30000
+};
+
+// If URL contains @ (embedded auth), the client will handle it automatically
+// If separate credentials, add them
+if (!esHost.includes('@') && process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD) {
+  clientConfig.auth = {
+    username: process.env.ELASTICSEARCH_USERNAME,
+    password: process.env.ELASTICSEARCH_PASSWORD
+  };
+}
+
+export const esClient = new Client(clientConfig);
 
 export async function initializeIndex() {
   const indexName = 'emails';
   
   try {
-    // Check if Elasticsearch is available
-    await esClient.ping();
-    console.log('Elasticsearch connection successful');
+    // Try to ping with more forgiving settings
+    console.log('Attempting to connect to Elasticsearch...');
+    
+    const pingResult = await esClient.info();
+    console.log('✅ Connected to:', pingResult.version?.distribution || 'Elasticsearch', pingResult.version?.number);
     
     const exists = await esClient.indices.exists({ index: indexName });
     
@@ -100,14 +80,18 @@ export async function initializeIndex() {
           }
         }
       });
-      console.log(`Index ${indexName} created successfully`);
+      console.log(`✅ Index ${indexName} created successfully`);
     } else {
-      console.log(`Index ${indexName} already exists`);
+      console.log(`✅ Index ${indexName} already exists`);
     }
   } catch (error: any) {
-    console.error('Error initializing Elasticsearch:', error.message);
+    console.error('❌ Error initializing Elasticsearch:', error.message);
     console.warn('⚠️  Elasticsearch is not available. Email storage will not work.');
-    console.warn('💡 To fix: Set ELASTICSEARCH_URL environment variable or run Elasticsearch locally');
+    console.warn('💡 Troubleshooting:');
+    console.warn('   1. Check if ELASTICSEARCH_URL is set correctly');
+    console.warn('   2. Verify credentials in the URL');
+    console.warn('   3. Check if the service is running (Bonsai/SearchBox dashboard)');
+    console.warn('   4. Try using SearchBox.io or Elastic Cloud instead');
     // Don't throw error - allow app to start without Elasticsearch
   }
 }
@@ -121,9 +105,9 @@ export async function indexEmail(email: EmailDocument) {
       id: email.messageId,
       document: email
     });
-    console.log(`Email indexed: ${email.subject}`);
+    console.log(`✅ Email indexed: ${email.subject}`);
   } catch (error: any) {
-    console.error('Error indexing email:', error.message);
+    console.error('❌ Error indexing email:', error.message);
     throw error;
   }
 }
@@ -139,9 +123,9 @@ export async function updateEmailCategory(id: string, category: string) {
         category: category
       }
     });
-    console.log(`Email ${id} updated with category: ${category}`);
+    console.log(`✅ Email ${id} updated with category: ${category}`);
   } catch (error: any) {
-    console.error('Error updating email category:', error.message);
+    console.error('❌ Error updating email category:', error.message);
     throw error;
   }
 }
@@ -166,7 +150,7 @@ export async function searchEmails(
       ...hit._source
     }));
   } catch (error: any) {
-    console.error('Error searching emails:', error.message);
+    console.error('❌ Error searching emails:', error.message);
     throw error;
   }
 }
