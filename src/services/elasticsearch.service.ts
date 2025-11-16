@@ -19,19 +19,47 @@ export interface EmailDocument {
 
 const esHost = process.env.ELASTICSEARCH_URL || 'http://localhost:9200';
 
-console.log('Connecting to Elasticsearch:', esHost.replace(/:[^:]*@/, ':****@')); // Hide password in logs
+console.log('Elasticsearch URL configured:', esHost ? 'Yes' : 'No');
+console.log('Connecting to Elasticsearch...');
+
+// Parse the URL to extract auth if embedded
+let nodeUrl = esHost;
+let authConfig = undefined;
+
+try {
+  const url = new URL(esHost);
+  
+  // If URL has username:password in it, extract them
+  if (url.username && url.password) {
+    authConfig = {
+      username: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password)
+    };
+    
+    // Rebuild URL without auth for the node
+    nodeUrl = `${url.protocol}//${url.host}${url.pathname}${url.search}`;
+    console.log('Auth extracted from URL');
+  }
+} catch (e) {
+  console.log('Using URL as-is');
+}
 
 export const esClient = new Client({
-  node: esHost,
-  // Only add auth if username/password are separate (not needed for Bonsai URL with embedded auth)
-  auth: (!esHost.includes('@') && process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD) 
+  node: nodeUrl,
+  auth: authConfig || (process.env.ELASTICSEARCH_USERNAME && process.env.ELASTICSEARCH_PASSWORD 
     ? {
         username: process.env.ELASTICSEARCH_USERNAME,
         password: process.env.ELASTICSEARCH_PASSWORD
       }
-    : undefined,
+    : undefined),
   tls: {
-    rejectUnauthorized: false // Allow self-signed certificates
+    rejectUnauthorized: false
+  },
+  requestTimeout: 30000,
+  // Add compatibility header for Bonsai
+  headers: {
+    'Accept': 'application/json',
+    'Content-Type': 'application/json'
   }
 });
 
